@@ -1,0 +1,5 @@
+date,product,quantity,unit_price
+not-a-date,Widget,3,9.99
+2024-01-06,,1,5.00
+2024-01-07,Gadget,0,5.00
+2024-01-08,Gadget,3,Infinity

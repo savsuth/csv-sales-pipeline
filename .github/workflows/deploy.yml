@@ -1,0 +1,61 @@
+name: Deploy infrastructure
+
+# Manual only -- never runs on push or pull_request, so PRs can never
+# deploy anything. Requires (see README "Enabling GitHub Actions deploys"):
+#   1. infra/bootstrap applied once from a laptop (creates the state bucket
+#      and, with enable_github_oidc = true, the deploy role).
+#   2. A GitHub Environment named "production" with required reviewers AND
+#      a deployment-branch rule restricting it to main. The role's trust
+#      policy trusts exactly repo:OWNER/REPO:environment:production.
+#   3. Repository/environment *variables* (not secrets -- a role ARN,
+#      region, and bucket name are not sensitive): AWS_DEPLOY_ROLE_ARN,
+#      AWS_REGION, TF_STATE_BUCKET. No AWS access keys are stored anywhere.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+concurrency:
+  group: terraform-deploy
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=csv-sales-pipeline/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false tfplan
