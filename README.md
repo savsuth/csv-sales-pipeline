@@ -245,7 +245,7 @@ list with defaults):
 | `aws_region` | Region for every resource (default `us-east-2`). Some AWS accounts restrict which regions general workloads may run in via an AWS Organizations Service Control Policy; if resource creation fails with a region-specific authorization error, check for such a policy and set `aws_region` accordingly. |
 | `notification_email` | Subscribes an email address to the SNS topic. Empty by default. |
 | `lambda_max_concurrency` | Caps concurrent Lambda invocations from the SQS trigger (2-1000, default 5). |
-| `enable_budget_alert`, `budget_limit_usd`, `budget_alert_email` | Optional AWS Budget alert. See [Cost and cleanup](#monitoring-troubleshooting-and-cleanup). |
+| `enable_budget_alert`, `budget_limit_usd`, `budget_alert_email` | Optional AWS Budget alert. |
 
 Set these in a gitignored `infra/terraform.tfvars`. `infra/bootstrap` has
 its own separate `variables.tf` and reads its own gitignored
@@ -374,91 +374,3 @@ infra/bootstrap/    # Terraform (state bucket, optional OIDC role)
 scripts/            # Upload, status, report, redrive, teardown helpers
 .github/workflows/  # CI (always) and deploy (manual, gated)
 ```
-
-## Monitoring, Troubleshooting, and Cleanup
-
-Lambda logs are structured JSON, one object per line, including `job_id`
-and `error_code` fields. CSV row content, secrets, and credentials are
-never logged.
-
-As in [AWS Usage](#aws-usage), replace each `<...>` placeholder below with
-the actual value (`terraform output` in `infra/`, or the job ID from a
-notification or `scripts/check_job.sh`) before running -- a shell treats
-literal angle brackets as redirection.
-
-<details>
-<summary>Finding logs for a job</summary>
-
-```bash
-aws logs tail /aws/lambda/<function-name> --since 1h --filter-pattern '"<job-id>"'
-```
-
-Or CloudWatch Logs Insights, since every line is valid JSON:
-
-```
-fields @timestamp, level, message, error_code
-| filter job_id = "<job-id>"
-| sort @timestamp
-```
-
-</details>
-
-<details>
-<summary>Inspecting and redriving failed messages</summary>
-
-```bash
-aws sqs receive-message --queue-url <dead-letter-queue-url> --max-number-of-messages 10
-```
-
-Investigate and fix the underlying cause first (check the job's
-`error_code`/`error_message` with `scripts/check_job.sh`), then move
-messages back onto the main queue:
-
-```bash
-scripts/redrive_dlq.sh <dlq-url> <processing-queue-arn>
-```
-
-This uses SQS's native `StartMessageMoveTask`. Because processing is
-idempotent per job ID (see
-[Reliability and limitations](#reliability-and-limitations)), redriving a
-message whose job already completed is harmless.
-
-</details>
-
-<details>
-<summary>Investigating a missing notification email</summary>
-
-Check the job's `notification_status` field with `scripts/check_job.sh`.
-`pending` or `failed` means SNS publication hasn't been recorded as
-successful yet -- not that an email wasn't delivered; these fields track
-publication, not inbox delivery. Confirm the SNS email subscription was
-actually confirmed, and check the Lambda logs for an `sns_publish_failed`
-entry.
-
-</details>
-
-<details>
-<summary>Cost and cleanup</summary>
-
-Cost drivers: S3 storage (a versioned bucket retains every version,
-including from retries), Lambda invocation time, DynamoDB and SNS (both
-pay-per-request), and CloudWatch Logs storage (bounded by
-`log_retention_days`). Actual cost depends on usage volume.
-
-An AWS Budget alert (`enable_budget_alert`) only sends a notification when
-spend crosses a threshold -- it does not throttle, block, or cap spending
-in any way.
-
-Neither data bucket is created with `force_destroy`, so `terraform
-destroy` fails on a non-empty bucket rather than silently deleting
-uploads and reports. To empty a bucket deliberately (irreversible):
-
-```bash
-python scripts/empty_bucket.py <bucket-name>            # dry run, counts only
-python scripts/empty_bucket.py <bucket-name> --delete    # asks for confirmation
-```
-
-The state bucket created by `infra/bootstrap` has `prevent_destroy` set
-and is not touched by the main stack's `terraform destroy`.
-
-</details>
