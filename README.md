@@ -125,41 +125,41 @@ date,product,quantity,unit_price,row_number,rejection_reason
 2024-01-06,,1,5.00,4,empty_product
 ```
 
-A file missing a required column, with duplicate headers, that can't be
+A file missing a required column, with duplicate headers, that cannot be
 decoded, or with a field exceeding Python's CSV field-size limit is
-rejected as a whole file: nothing is written, no report and no partial
-output. Malformed quoting, including an unterminated quoted field, is not
-a file-level error here -- Python's CSV parser absorbs everything through
-the next matching quote (or the end of the file) into a single field
-rather than raising a parse error, which typically surfaces as a
-row-level `row_length_mismatch` rejection for that row instead (and can
-absorb what looks like a subsequent data row into the same field, rather
-than parsing it separately). An individual invalid row is otherwise
-recorded in `rejected_rows.csv` with a reason and excluded from the
-totals -- the rest of the file is still processed. If every row turns out
-invalid, the job status is also `validation_failed`, but in that case
-`summary.json` and `rejected_rows.csv` are still produced, showing zero
-valid rows and why each row failed. **This distinction matters when
-retrieving reports**: a file-level rejection produces no report to
-download; a structurally valid file with zero valid rows does.
+rejected as a whole file, with nothing written. Malformed quoting,
+including an unterminated quoted field, is not a file-level error:
+Python's CSV parser absorbs everything through the next matching quote,
+or the end of the file, into a single field rather than raising a parse
+error. This typically surfaces as a row-level `row_length_mismatch`
+rejection for that row, and can absorb what looks like a subsequent data
+row into the same field instead of parsing it separately. An individual
+invalid row is otherwise recorded in `rejected_rows.csv` with a reason
+and excluded from the totals, while the rest of the file is still
+processed. If every row turns out invalid, the job status is also
+`validation_failed`, but `summary.json` and `rejected_rows.csv` are still
+produced in that case, showing zero valid rows and why each one failed.
+This distinction matters when retrieving reports: a file-level rejection
+produces no report to download, while a structurally valid file with
+zero valid rows does.
 
-Extra columns are allowed and ignored for valid rows; for a rejected row
-they are retained in `rejected_rows.csv`, which echoes the raw row, subject
-to the same spreadsheet formula-injection escaping applied to every field
-(below).
+Extra columns are allowed and ignored for valid rows. For a rejected row,
+they are retained in `rejected_rows.csv`, which echoes the raw row,
+subject to the same spreadsheet formula-injection escaping described
+below and applied to every field.
 
 Monetary values are computed with Python's `Decimal` type at its default
-precision (28 significant digits), not binary floating point, and
-serialized as plain decimal strings -- no scientific notation and no float
-rounding error. This is exact arithmetic within that precision, not
-arbitrary-precision arithmetic; it does not guarantee exactness for
+precision of 28 significant digits, not binary floating point, and
+serialized as plain decimal strings with no scientific notation and no
+float rounding error. This is exact arithmetic within that precision, not
+arbitrary-precision arithmetic, and does not guarantee exactness for
 inputs whose aggregated values exceed 28 significant digits.
 
-Fields written to `rejected_rows.csv` that begin with `=`, `+`, `-`, `@`, a
-tab, or a carriage return are prefixed with a leading apostrophe before
-being written, per OWASP's CSV-injection guidance -- this prevents a value
-like `=SUM(A1:A9)` in a rejected row from executing as a formula when the
-file is opened in spreadsheet software.
+Fields written to `rejected_rows.csv` that begin with `=`, `+`, `-`, `@`,
+a tab, or a carriage return are prefixed with a leading apostrophe before
+being written, per OWASP's CSV-injection guidance. This prevents a value
+such as `=SUM(A1:A9)` in a rejected row from executing as a formula when
+the file is opened in spreadsheet software.
 
 <details>
 <summary>Row-level rejection reason codes and internal field names</summary>
